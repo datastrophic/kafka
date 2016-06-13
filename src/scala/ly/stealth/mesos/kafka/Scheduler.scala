@@ -33,7 +33,7 @@ import scala.collection.mutable
 
 object Scheduler extends org.apache.mesos.Scheduler {
   private val logger: Logger = Logger.getLogger(this.getClass)
-  val version: Version = new Version("0.9.5.1")
+  val version: Version = new Version("0.10.0.0")
 
   val cluster: Cluster = new Cluster()
   private var driver: SchedulerDriver = null
@@ -419,7 +419,7 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
       credsBuilder = Credential.newBuilder()
       credsBuilder.setPrincipal(Config.principal)
-      credsBuilder.setSecret(ByteString.copyFromUtf8(Config.secret))
+      credsBuilder.setSecret(Config.secret)
     }
 
     val driver =

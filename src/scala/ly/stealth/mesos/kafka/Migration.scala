@@ -16,7 +16,7 @@ object Migration {
 
   private val values: util.TreeMap[Version, Migration] = new util.TreeMap[Version, Migration]()
   private def add(m: Migration): Unit = { values.put(m.version, m); }
-  add(M_0_9_5_1)
+  add(M_0_10_0_0)
 
   def all: util.List[Migration] = new util.ArrayList(values.values())
 
@@ -31,8 +31,8 @@ object Migration {
     result
   }
 
-  object M_0_9_5_1 extends Migration {
-    def version: Version = new Version("0.9.5.1")
+  object M_0_10_0_0 extends Migration {
+    def version: Version = new Version("0.10.0.0")
 
     def apply(_json: Map[String, Object]): Map[String, Object] = {
       val json = new mutable.HashMap[String, Object]() ++ _json

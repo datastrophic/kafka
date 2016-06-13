@@ -32,7 +32,7 @@ import ly.stealth.mesos.kafka.Topics.Topic
 import kafka.log.LogConfig
 
 class Topics {
-  private def newZkClient: ZkClient = new ZkClient(Config.zk, 30000, 30000, ZKStringSerializer)
+  private def newZkUtils: ZkUtils = ZkUtils(Config.zk, 30000, 30000, isZkSecurityEnabled = false)//todo: parametrize isZkSecurityEnabled
 
   def getTopic(name: String): Topics.Topic = {
     if (name == null) return null
@@ -41,13 +41,13 @@ class Topics {
   }
 
   def getTopics: util.List[Topics.Topic] = {
-    val zkClient = newZkClient
+    val zkUtils = newZkUtils
 
     try {
-      var names = ZkUtils.getAllTopics(zkClient)
+      val names = zkUtils.getAllTopics
 
-      val assignments: mutable.Map[String, Map[Int, Seq[Int]]] = ZkUtils.getPartitionAssignmentForTopics(zkClient, names)
-      val configs = AdminUtils.fetchAllTopicConfigs(zkClient)
+      val assignments: mutable.Map[String, Map[Int, Seq[Int]]] = zkUtils.getPartitionAssignmentForTopics(names)
+      val configs = AdminUtils.fetchAllTopicConfigs(zkUtils)
 
       val topics = new util.ArrayList[Topics.Topic]
       for (name <- names.sorted)
@@ -59,7 +59,7 @@ class Topics {
 
       topics
     } finally {
-      zkClient.close()
+      zkUtils.close()
     }
   }
 
@@ -67,12 +67,12 @@ class Topics {
     var brokers_ = brokers
 
     if (brokers_ == null) {
-      val zkClient = newZkClient
-      try { brokers_ = ZkUtils.getSortedBrokerList(zkClient)}
-      finally { zkClient.close() }
+      val zkUtils = newZkUtils
+      try { brokers_ = zkUtils.getSortedBrokerList()}
+      finally { zkUtils.close() }
     }
 
-    AdminUtils.assignReplicasToBrokers(brokers_, partitions, replicas, 0, 0).mapValues(new util.ArrayList[Int](_))
+    AdminUtils.assignReplicasToBrokers(brokers_.map(b => BrokerMetadata(b, None)), partitions, replicas, 0, 0).mapValues(new util.ArrayList[Int](_))
   }
 
   def addTopic(name: String, assignment: util.Map[Int, util.List[Int]] = null, options: util.Map[String, String] = null): Topic = {
@@ -83,9 +83,9 @@ class Topics {
     if (options != null)
       for ((k, v) <- options) config.setProperty(k, v)
 
-    val zkClient = newZkClient
-    try { AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK(zkClient, name, assignment_.mapValues(_.toList), config) }
-    finally { zkClient.close() }
+    val zkUtils = newZkUtils
+    try { AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK(zkUtils, name, assignment_.mapValues(_.toList), config) }
+    finally { zkUtils.close() }
 
     getTopic(name)
   }
@@ -94,9 +94,9 @@ class Topics {
     val config: Properties = new Properties()
     for ((k, v) <- options) config.setProperty(k, v)
 
-    val zkClient = newZkClient
-    try { AdminUtils.changeTopicConfig(zkClient, topic.name, config) }
-    finally { zkClient.close() }
+    val zkUtils = newZkUtils
+    try { AdminUtils.changeTopicConfig(zkUtils, topic.name, config) }
+    finally { zkUtils.close() }
   }
 
   def validateOptions(options: util.Map[String, String]): String = {
