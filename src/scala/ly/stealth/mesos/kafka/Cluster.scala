@@ -18,14 +18,16 @@
 package ly.stealth.mesos.kafka
 
 import java.util
+
 import scala.util.parsing.json.{JSONArray, JSONObject}
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import java.util.Collections
-import java.io.{FileWriter, File}
+import java.io.{File, FileWriter}
+
 import org.I0Itec.zkclient.ZkClient
-import kafka.utils.ZKStringSerializer
+import kafka.utils.{ZKStringSerializer, ZkUtils}
 import org.I0Itec.zkclient.exception.ZkNodeExistsException
 import net.elodina.mesos.util.Version
 
@@ -136,7 +138,7 @@ object Cluster {
   class ZkStorage(val path: String) extends Storage {
     createChrootIfRequired()
 
-    def zkClient: ZkClient = new ZkClient(Config.zk, 30000, 30000, ZKStringSerializer)
+    def zkClient: ZkClient = ZkUtils.createZkClient(Config.zk, 30000, 30000)
 
     private def createChrootIfRequired(): Unit = {
       val slashIdx: Int = Config.zk.indexOf('/')
@@ -145,7 +147,7 @@ object Cluster {
       val chroot = Config.zk.substring(slashIdx)
       val zkConnect = Config.zk.substring(0, slashIdx)
 
-      val client = new ZkClient(zkConnect, 30000, 30000, ZKStringSerializer)
+      val client = ZkUtils.createZkClient(Config.zk, 30000, 30000)
       try { client.createPersistent(chroot, true) }
       finally { client.close() }
     }

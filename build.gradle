@@ -10,9 +10,10 @@ version = new File('src/scala/ly/stealth/mesos/kafka/Scheduler.scala').readLines
 
 jar.archiveName = "kafka-mesos-${version}.jar"
 
-def mesosVersion="0.25.0"
-def kafkaVersion="0.8.1.1"
-def kafkaScalaVersion="2.10"
+def mesosVersion="0.28.1"
+def kafkaVersion="0.10.0.0"
+def kafkaScalaVersion="2.11"
+def scalaVersion="2.11.6"
 
 repositories {
     mavenCentral()
@@ -34,7 +35,7 @@ sourceSets {
 
 def jettyVersion = "9.0.4.v20130625"
 dependencies {
-    compile "org.scala-lang:scala-library:2.10.6"
+    compile "org.scala-lang:scala-library:$scalaVersion"
     compile "org.apache.mesos:mesos:$mesosVersion"
     compile name: "util-mesos-0.1.0.0"
     compile "com.google.protobuf:protobuf-java:2.5.0"

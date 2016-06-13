@@ -165,10 +165,10 @@ object Expr {
   def expandTopics(expr: String): util.List[String] = {
     val topics = new util.TreeSet[String]()
 
-    val zkClient = newZkClient
+    val zkUtils = newZkUtils
     var allTopics: util.List[String] = null
-    try { allTopics = ZkUtils.getAllTopics(zkClient) }
-    finally { zkClient.close() }
+    try { allTopics = zkUtils.getAllTopics() }
+    finally { zkUtils.close() }
 
     for (part <- expr.split(",").map(_.trim).filter(!_.isEmpty)) {
       if (!part.endsWith("*")) topics.add(part)
@@ -189,5 +189,5 @@ object Expr {
     out.println("  t*        - topics starting with 't'")
   }
 
-  private def newZkClient: ZkClient = new ZkClient(Config.zk, 30000, 30000, ZKStringSerializer)
+  private def newZkUtils: ZkUtils = ZkUtils(Config.zk, 30000, 30000, isZkSecurityEnabled = false)//todo: parametrize isZkSecurityEnabled
 }

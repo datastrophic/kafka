@@ -17,16 +17,20 @@
 
 package ly.stealth.mesos.kafka
 
-import org.junit.{Test, After, Before}
+import org.junit.{After, Before, Test}
 import org.junit.Assert._
 import org.I0Itec.zkclient.ZkClient
 import kafka.utils.{ZKStringSerializer, ZkUtils}
+
 import scala.collection.JavaConversions._
 import java.util
 
+import kafka.common.TopicAndPartition
+import org.apache.log4j.Logger
+
 class RebalancerTest extends KafkaMesosTestCase {
   var rebalancer: Rebalancer = null
-  var zkClient: ZkClient = null
+  var zkUtils: ZkUtils = null
 
   @Before
   override def before {
@@ -37,8 +41,7 @@ class RebalancerTest extends KafkaMesosTestCase {
     Config.zk = s"localhost:$port"
 
     startZkServer()
-    zkClient = zkServer.getZkClient
-    zkClient.setZkSerializer(ZKStringSerializer)
+    zkUtils = ZkUtils(Config.zk, 3000, 3000, isZkSecurityEnabled = false)
   }
 
   @After
@@ -64,9 +67,17 @@ class RebalancerTest extends KafkaMesosTestCase {
   @Test
   def start_in_progress {
     Scheduler.cluster.topics.addTopic("topic", Map(0 -> util.Arrays.asList(0), 1 -> util.Arrays.asList(0)))
-    ZkUtils.createPersistentPath(zkClient, ZkUtils.ReassignPartitionsPath, "")
 
-    try { rebalancer.start(util.Arrays.asList("t1"), util.Arrays.asList("0", "1")); fail() }
-    catch { case e: Rebalancer.Exception => assertTrue(e.getMessage, e.getMessage.contains("in progress")) }
+    val partitionsReassignmentData = Map(TopicAndPartition("topic", 0) -> Seq(0,1))
+    val jsonReassignmentData = zkUtils.formatAsReassignmentJson(partitionsReassignmentData)
+    zkUtils.createPersistentPath(ZkUtils.ReassignPartitionsPath, jsonReassignmentData)
+
+    try {
+      rebalancer.start(util.Arrays.asList("topic"), util.Arrays.asList("0", "1"))
+      fail()
+    }
+    catch {
+      case e: Rebalancer.Exception => assertTrue(e.getMessage, e.getMessage.contains("in progress"))
+    }
   }
 }
