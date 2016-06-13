@@ -419,7 +419,7 @@ object Scheduler extends org.apache.mesos.Scheduler {
 
       credsBuilder = Credential.newBuilder()
       credsBuilder.setPrincipal(Config.principal)
-      credsBuilder.setSecret(ByteString.copyFromUtf8(Config.secret))
+      credsBuilder.setSecret(Config.secret)
     }
 
     val driver =

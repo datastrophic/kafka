@@ -21,14 +21,12 @@ import java.util
 
 import scala.Some
 import scala.collection.JavaConversions._
-import scala.collection.{mutable, Seq, Map}
-
+import scala.collection.{Map, Seq, mutable}
 import org.I0Itec.zkclient.ZkClient
 import org.I0Itec.zkclient.exception.ZkNodeExistsException
-
 import kafka.admin._
-import kafka.common.TopicAndPartition
-import kafka.utils.{ZkUtils, ZKStringSerializer}
+import kafka.common.{AdminCommandFailedException, TopicAndPartition}
+import kafka.utils.{ZKStringSerializer, ZkUtils}
 import net.elodina.mesos.util.Period
 import org.apache.log4j.Logger
 
@@ -38,10 +36,10 @@ class Rebalancer {
   @volatile private var assignment: Map[TopicAndPartition, Seq[Int]] = null
   @volatile private var reassignment: Map[TopicAndPartition, Seq[Int]] = null
 
-  private def newZkClient: ZkClient = new ZkClient(Config.zk, 30000, 30000, ZKStringSerializer)
+  private def newZkUtils: ZkUtils = ZkUtils(Config.zk, 30000, 30000, isZkSecurityEnabled = false)//todo: parametrize isZkSecurityEnabled
 
   def running: Boolean = {
-    val zkClient = newZkClient
+    val zkClient = newZkUtils.zkClient
     try { zkClient.exists(ZkUtils.ReassignPartitionsPath) }
     finally { zkClient.close() }
   }
@@ -50,16 +48,17 @@ class Rebalancer {
     if (topics.isEmpty) throw new Rebalancer.Exception("no topics")
 
     logger.info(s"Starting rebalance for topics ${topics.mkString(",")} on brokers ${brokers.mkString(",")} with ${if (replicas == -1) "<default>" else replicas} replicas")
-    val zkClient = newZkClient
+    val zkUtils = newZkUtils
     try {
-      val assignment: Map[TopicAndPartition, Seq[Int]] = ZkUtils.getReplicaAssignmentForTopics(zkClient, topics)
-      val reassignment: Map[TopicAndPartition, Seq[Int]] = getReassignments(brokers.map(Integer.parseInt), topics, assignment, replicas)
+      val assignment: Map[TopicAndPartition, Seq[Int]] = zkUtils.getReplicaAssignmentForTopics(topics)
+      val reassignment: Map[TopicAndPartition, Seq[Int]] = getReassignments(brokers.map(b => BrokerMetadata(b.toInt, None)), topics, assignment, replicas)
 
-      reassignPartitions(zkClient, reassignment)
+      reassignPartitions(zkUtils, reassignment)
+
       this.reassignment = reassignment
       this.assignment = assignment
     } finally {
-      zkClient.close()
+      zkUtils.close()
     }
   }
 
@@ -67,9 +66,9 @@ class Rebalancer {
     if (assignment == null) return ""
     var s = ""
 
-    val zkClient = newZkClient
+    val zkUtils = newZkUtils
     try {
-      val reassigning: Map[TopicAndPartition, Seq[Int]] = ZkUtils.getPartitionsBeingReassigned(zkClient).mapValues(_.newReplicas)
+      val reassigning: Map[TopicAndPartition, Seq[Int]] = zkUtils.getPartitionsBeingReassigned.mapValues(_.newReplicas)
 
       val byTopic: Map[String, Map[TopicAndPartition, Seq[Int]]] = assignment.groupBy(tp => tp._1.topic)
       for (topic <- byTopic.keys.to[List].sorted) {
@@ -81,12 +80,12 @@ class Rebalancer {
           s += "  " + topicAndPartition.partition + ": " + brokers.mkString(",")
           s += " -> "
           s += reassignment.getOrElse(topicAndPartition, null).mkString(",")
-          s += " - " + getReassignmentState(zkClient, topicAndPartition, reassigning)
+          s += " - " + getReassignmentState(zkUtils, topicAndPartition, reassigning)
           s += "\n"
         }
       }
     } finally {
-      zkClient.close()
+      zkUtils.close()
     }
 
     s
@@ -105,7 +104,7 @@ class Rebalancer {
     matches
   }
 
-  private def getReassignments(brokerIds: Seq[Int], topics: util.List[String], assignment: Map[TopicAndPartition, Seq[Int]], replicas: Int = -1): Map[TopicAndPartition, Seq[Int]] = {
+  private def getReassignments(brokerMetadata: Seq[BrokerMetadata], topics: util.List[String], assignment: Map[TopicAndPartition, Seq[Int]], replicas: Int = -1): Map[TopicAndPartition, Seq[Int]] = {
     var reassignment : Map[TopicAndPartition, Seq[Int]] = new mutable.HashMap[TopicAndPartition, List[Int]]()
 
     val byTopic: Map[String, Map[TopicAndPartition, Seq[Int]]] = assignment.groupBy(tp => tp._1.topic)
@@ -114,32 +113,32 @@ class Rebalancer {
       val rf: Int = if (replicas != -1) replicas else entry._2.valuesIterator.next().size
       val partitions: Int = entry._2.size
     
-      val assignedReplicas: Map[Int, Seq[Int]] = AdminUtils.assignReplicasToBrokers(brokerIds, partitions, rf, 0, 0)
+      val assignedReplicas: Map[Int, Seq[Int]] = AdminUtils.assignReplicasToBrokers(brokerMetadata, partitions, rf, 0, 0)
       reassignment ++= assignedReplicas.map(replicaEntry => TopicAndPartition(topic, replicaEntry._1) -> replicaEntry._2)
     }
 
     reassignment.toMap
   }
 
-  private def getReassignmentState(zkClient: ZkClient, topicAndPartition: TopicAndPartition, reassigning: Map[TopicAndPartition, Seq[Int]]): String = {
+  private def getReassignmentState(zkUtils: ZkUtils, topicAndPartition: TopicAndPartition, reassigning: Map[TopicAndPartition, Seq[Int]]): String = {
     reassigning.get(topicAndPartition) match {
       case Some(partition) => "running"
       case None =>
         // check if the current replica assignment matches the expected one after reassignment
         val assignedBrokers = reassignment(topicAndPartition)
-        val brokers = ZkUtils.getReplicasForPartition(zkClient, topicAndPartition.topic, topicAndPartition.partition)
+        val brokers = zkUtils.getReplicasForPartition(topicAndPartition.topic, topicAndPartition.partition)
 
         if(brokers.sorted == assignedBrokers.sorted) "done"
         else "error"
     }
   }
 
-  private def reassignPartitions(zkClient: ZkClient, partitions: Map[TopicAndPartition, Seq[Int]]): Unit = {
+  private def reassignPartitions(zkUtils: ZkUtils, partitions: Map[TopicAndPartition, Seq[Int]]): Unit = {
     try {
-      val json = ZkUtils.getPartitionReassignmentZkData(partitions)
-      ZkUtils.createPersistentPath(zkClient, ZkUtils.ReassignPartitionsPath, json)
+      val reassignPartitionsCommand = new ReassignPartitionsCommand(zkUtils, partitions)
+      reassignPartitionsCommand.reassignPartitions()
     } catch {
-      case ze: ZkNodeExistsException => throw new Rebalancer.Exception("rebalance is in progress")
+      case ze: AdminCommandFailedException => throw new Rebalancer.Exception(ze.getMessage)
     }
   }
 }
